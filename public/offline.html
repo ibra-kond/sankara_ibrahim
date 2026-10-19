@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#2B1E15" />
+  <title>Hors connexion</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100svh; display: grid; place-items: center; padding: 24px;
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      background: #FAF6EF; color: #2B1E15; text-align: center;
+    }
+    @media (prefers-color-scheme: dark) { body { background: #17110C; color: #F3EBDD; } p { color: #C4B39E !important; } }
+    .icon { width: 72px; height: 72px; margin: 0 auto 24px; border-radius: 20px; background: #2B1E15; display: grid; place-items: center; }
+    h1 { font-family: Georgia, serif; font-size: 1.9rem; margin: 0 0 12px; font-weight: 600; }
+    p { color: #685242; max-width: 30ch; margin: 0 auto 28px; line-height: 1.5; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; padding: 0 28px;
+      border-radius: 999px; font-weight: 600; font-size: 1rem; text-decoration: none; border: 0; cursor: pointer; }
+    .cta { background: #1E5B3A; color: #fff; }
+    .ghost { background: transparent; color: inherit; border: 1px solid currentColor; margin-top: 12px; }
+    .stack { display: flex; flex-direction: column; align-items: center; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="icon" aria-hidden="true">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#C8A27A" stroke-width="1.8" stroke-linecap="round"><path d="M2 2l20 20M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5.2-2.8M12 20h.01M16.7 10.7A10 10 0 0 1 19 13M2 8.8a15 15 0 0 1 4.2-2.7M10.7 5a15 15 0 0 1 11.3 3.8"/></svg>
+    </div>
+    <h1>Pas de connexion pour le moment</h1>
+    <p>Les réalisations s’afficheront dès le retour du réseau. Vous pouvez quand même nous écrire : WhatsApp enverra le message plus tard.</p>
+    <div class="stack">
+      <a id="wa" class="btn cta" href="#">Écrire sur WhatsApp</a>
+      <button class="btn ghost" onclick="location.reload()">Réessayer</button>
+    </div>
+  </main>
+  <script>
+    // Numéro récupéré depuis la dernière visite (cache du site)
+    try {
+      var s = JSON.parse(localStorage.getItem('atelier-cache-v1')).settings
+      document.getElementById('wa').href = 'https://wa.me/' + s.whatsapp + '?text=' +
+        encodeURIComponent('Bonjour ' + s.ownerFirstName + ", j'ai vu votre portfolio et j'aimerais un devis.")
+    } catch (e) { document.getElementById('wa').style.display = 'none' }
+  </script>
+</body>
+</html>

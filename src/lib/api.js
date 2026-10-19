@@ -1,0 +1,185 @@
+/**
+ * Couche d'accès aux données.
+ * - Avec Supabase : lecture publique via REST, écriture via le client Supabase (admin connecté).
+ * - Sans Supabase : « mode démo » dans le localStorage du navigateur, pour tester le site et l'admin.
+ */
+import config from '../config'
+import { isSupabase, getClient, restGet, MEDIA_BUCKET } from './supabase'
+import { demoCreations, demoServices, demoTestimonials, demoBeforeAfter } from './demoData'
+import { blobToDataUrl, compressImage } from './image'
+import { slugify, uid } from './utils'
+
+export const TABLES = ['creations', 'services', 'testimonials', 'before_after']
+
+/* ------------------------------------------------------------------ */
+/*  Mode démo                                                          */
+/* ------------------------------------------------------------------ */
+const DEMO_KEY = 'atelier-demo-v1'
+export const DEMO_LOGIN = { email: 'admin@demo.fr', password: 'demo1234' }
+
+function demoRead() {
+  try {
+    const raw = localStorage.getItem(DEMO_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {
+    /* stockage indisponible */
+  }
+  return {
+    settings: {},
+    creations: demoCreations,
+    services: demoServices,
+    testimonials: demoTestimonials,
+    before_after: demoBeforeAfter,
+  }
+}
+
+function demoWrite(db) {
+  try {
+    localStorage.setItem(DEMO_KEY, JSON.stringify(db))
+  } catch {
+    throw new Error('Mémoire du navigateur pleine (mode démo). Supprimez quelques photos.')
+  }
+}
+
+const byPosition = (a, b) => (a.position ?? 0) - (b.position ?? 0)
+
+/* ------------------------------------------------------------------ */
+/*  Lecture publique                                                   */
+/* ------------------------------------------------------------------ */
+export async function fetchSettings() {
+  if (!isSupabase) return { ...config, ...demoRead().settings }
+  const rows = await restGet('settings?id=eq.1&select=data')
+  return { ...config, ...(rows[0]?.data || {}) }
+}
+
+export async function fetchPublic(table) {
+  if (!isSupabase) return demoRead()[table].filter((r) => r.visible).sort(byPosition)
+  return restGet(`${table}?select=*&visible=eq.true&order=position.asc,created_at.desc`)
+}
+
+/* ------------------------------------------------------------------ */
+/*  Authentification                                                   */
+/* ------------------------------------------------------------------ */
+export async function signIn(email, password) {
+  if (!isSupabase) {
+    if (email.trim().toLowerCase() === DEMO_LOGIN.email && password === DEMO_LOGIN.password) {
+      sessionStorage.setItem('demo-session', '1')
+      return { email }
+    }
+    throw new Error('Email ou mot de passe incorrect.')
+  }
+  const sb = await getClient()
+  const { data, error } = await sb.auth.signInWithPassword({ email: email.trim(), password })
+  if (error) throw new Error('Email ou mot de passe incorrect.')
+  return data.user
+}
+
+export async function signOut() {
+  if (!isSupabase) return sessionStorage.removeItem('demo-session')
+  const sb = await getClient()
+  await sb.auth.signOut()
+}
+
+export async function getUser() {
+  if (!isSupabase) return sessionStorage.getItem('demo-session') ? { email: DEMO_LOGIN.email } : null
+  const sb = await getClient()
+  const { data } = await sb.auth.getSession()
+  return data.session?.user || null
+}
+
+/* ------------------------------------------------------------------ */
+/*  Administration                                                     */
+/* ------------------------------------------------------------------ */
+export async function adminList(table) {
+  if (!isSupabase) return [...demoRead()[table]].sort(byPosition)
+  const sb = await getClient()
+  const { data, error } = await sb.from(table).select('*').order('position').order('created_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+/** Crée ou met à jour un élément. Renvoie l'élément enregistré. */
+export async function adminSave(table, item, existing = []) {
+  const record = { ...item }
+  if (table === 'creations') {
+    // Adresse lisible et unique : /realisations/table-en-iroko
+    let base = slugify(record.title)
+    let slug = base
+    let i = 2
+    while (existing.some((e) => e.slug === slug && e.id !== record.id)) slug = `${base}-${i++}`
+    record.slug = slug
+  }
+  if (!record.id) record.position = existing.length ? Math.max(...existing.map((e) => e.position ?? 0)) + 1 : 0
+
+  if (!isSupabase) {
+    const db = demoRead()
+    if (record.id) db[table] = db[table].map((r) => (r.id === record.id ? record : r))
+    else db[table] = [...db[table], { ...record, id: uid(), created_at: new Date().toISOString() }]
+    demoWrite(db)
+    return record
+  }
+
+  const sb = await getClient()
+  const { id, created_at, ...fields } = record
+  const query = id ? sb.from(table).update(fields).eq('id', id) : sb.from(table).insert(fields)
+  const { data, error } = await query.select().single()
+  if (error) throw new Error(error.message)
+  return data
+}
+
+export async function adminDelete(table, id) {
+  if (!isSupabase) {
+    const db = demoRead()
+    db[table] = db[table].filter((r) => r.id !== id)
+    return demoWrite(db)
+  }
+  const sb = await getClient()
+  const { error } = await sb.from(table).delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/** Enregistre le nouvel ordre (liste d'identifiants) */
+export async function adminReorder(table, ids) {
+  if (!isSupabase) {
+    const db = demoRead()
+    db[table] = db[table].map((r) => ({ ...r, position: ids.indexOf(r.id) }))
+    return demoWrite(db)
+  }
+  const sb = await getClient()
+  await Promise.all(ids.map((id, position) => sb.from(table).update({ position }).eq('id', id)))
+}
+
+export async function adminSaveSettings(data) {
+  if (!isSupabase) {
+    const db = demoRead()
+    db.settings = data
+    return demoWrite(db)
+  }
+  const sb = await getClient()
+  const { error } = await sb.from('settings').upsert({ id: 1, data, updated_at: new Date().toISOString() })
+  if (error) throw new Error(error.message)
+}
+
+/** Compresse puis envoie une photo. Renvoie { src, thumb }. */
+export async function uploadPhoto(file, folder = 'divers') {
+  const { full, thumb } = await compressImage(file)
+  if (!isSupabase) {
+    return { src: await blobToDataUrl(full), thumb: await blobToDataUrl(thumb) }
+  }
+  const sb = await getClient()
+  const ext = full.type === 'image/webp' ? 'webp' : 'jpg'
+  const name = `${folder}/${Date.now()}-${uid().slice(0, 8)}`
+  const opts = { contentType: full.type, cacheControl: '31536000', upsert: false }
+  const [a, b] = await Promise.all([
+    sb.storage.from(MEDIA_BUCKET).upload(`${name}.${ext}`, full, opts),
+    sb.storage.from(MEDIA_BUCKET).upload(`${name}-640.${ext}`, thumb, opts),
+  ])
+  if (a.error || b.error) throw new Error('Envoi de la photo impossible. Vérifiez votre connexion.')
+  const url = (path) => sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl
+  return { src: url(`${name}.${ext}`), thumb: url(`${name}-640.${ext}`) }
+}
+
+/** Réinitialise les données de démonstration */
+export function resetDemo() {
+  localStorage.removeItem(DEMO_KEY)
+}
