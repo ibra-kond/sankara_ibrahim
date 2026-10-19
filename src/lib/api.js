@@ -70,7 +70,17 @@ export async function signIn(email, password) {
   }
   const sb = await getClient()
   const { data, error } = await sb.auth.signInWithPassword({ email: email.trim(), password })
-  if (error) throw new Error('Email ou mot de passe incorrect.')
+  if (error) {
+    // Messages précis selon la cause (sans révéler si un email existe ou non)
+    const messages = {
+      email_not_confirmed: 'Ce compte n’est pas encore confirmé. Dans Supabase > Authentication > Users, confirmez l’utilisateur.',
+      over_request_rate_limit: 'Trop de tentatives. Patientez quelques minutes avant de réessayer.',
+      user_banned: 'Ce compte est bloqué. Vérifiez-le dans Supabase > Authentication > Users.',
+    }
+    if (messages[error.code]) throw new Error(messages[error.code])
+    if (error.status === 0 || /fetch|network/i.test(error.message)) throw new Error('Pas de connexion internet. Réessayez.')
+    throw new Error('Email ou mot de passe incorrect. En cas de doute, utilisez « Mot de passe oublié ? ».')
+  }
   return data.user
 }
 
