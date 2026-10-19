@@ -144,6 +144,12 @@ export default function Catalog() {
             <p className="mt-1 text-sm text-muted">Vérifiez votre connexion internet.</p>
             <button type="button" onClick={reload} className="btn-ghost mt-5">Réessayer</button>
           </div>
+        ) : creations.length === 0 ? (
+          <div className="card mx-auto max-w-md p-8 text-center">
+            <Icon name="grid" size={32} className="mx-auto text-muted" />
+            <p className="mt-3 font-semibold">Les premières réalisations arrivent bientôt.</p>
+            <p className="mt-1 text-sm text-muted">En attendant, décrivez-moi votre projet : je le fabrique sur mesure.</p>
+          </div>
         ) : list.length === 0 ? (
           <div className="card mx-auto max-w-md p-8 text-center">
             <Icon name="search" size={32} className="mx-auto text-muted" />
