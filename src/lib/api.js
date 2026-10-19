@@ -143,6 +143,16 @@ export async function getUser() {
   return data.session?.user || null
 }
 
+/** Traduit les erreurs de la base en messages compréhensibles */
+function friendlyDbError(error) {
+  if (error.code === '42501' || /row-level security|permission denied/i.test(error.message || '')) {
+    return new Error('Votre compte n’a pas les droits d’administrateur. Ajoutez votre email dans la table « admins » de Supabase.')
+  }
+  if (/JWT|expired/i.test(error.message || '')) return new Error('Votre session a expiré. Déconnectez-vous puis reconnectez-vous.')
+  if (/fetch|network/i.test(error.message || '')) return new Error('Pas de connexion internet. Réessayez.')
+  return new Error(error.message || 'Une erreur est survenue.')
+}
+
 /* ------------------------------------------------------------------ */
 /*  Administration                                                     */
 /* ------------------------------------------------------------------ */
@@ -150,7 +160,7 @@ export async function adminList(table) {
   if (!isSupabase) return [...demoRead()[table]].sort(byPosition)
   const sb = await getClient()
   const { data, error } = await sb.from(table).select('*').order('position').order('created_at', { ascending: false })
-  if (error) throw error
+  if (error) throw friendlyDbError(error)
   return data
 }
 
@@ -179,7 +189,7 @@ export async function adminSave(table, item, existing = []) {
   const { id, created_at, ...fields } = record
   const query = id ? sb.from(table).update(fields).eq('id', id) : sb.from(table).insert(fields)
   const { data, error } = await query.select().single()
-  if (error) throw new Error(error.message)
+  if (error) throw friendlyDbError(error)
   return data
 }
 
@@ -191,7 +201,7 @@ export async function adminDelete(table, id) {
   }
   const sb = await getClient()
   const { error } = await sb.from(table).delete().eq('id', id)
-  if (error) throw new Error(error.message)
+  if (error) throw friendlyDbError(error)
 }
 
 /** Enregistre le nouvel ordre (liste d'identifiants) */
@@ -213,7 +223,7 @@ export async function adminSaveSettings(data) {
   }
   const sb = await getClient()
   const { error } = await sb.from('settings').upsert({ id: 1, data, updated_at: new Date().toISOString() })
-  if (error) throw new Error(error.message)
+  if (error) throw friendlyDbError(error)
 }
 
 /** Compresse puis envoie une photo. Renvoie { src, thumb }. */
@@ -230,7 +240,11 @@ export async function uploadPhoto(file, folder = 'divers') {
     sb.storage.from(MEDIA_BUCKET).upload(`${name}.${ext}`, full, opts),
     sb.storage.from(MEDIA_BUCKET).upload(`${name}-640.${ext}`, thumb, opts),
   ])
-  if (a.error || b.error) throw new Error('Envoi de la photo impossible. Vérifiez votre connexion.')
+  const upErr = a.error || b.error
+  if (upErr) {
+    if (/security|unauthorized|403/i.test(`${upErr.message} ${upErr.statusCode || ''}`)) throw friendlyDbError({ code: '42501' })
+    throw new Error('Envoi de la photo impossible. Vérifiez votre connexion.')
+  }
   const url = (path) => sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl
   return { src: url(`${name}.${ext}`), thumb: url(`${name}-640.${ext}`) }
 }
