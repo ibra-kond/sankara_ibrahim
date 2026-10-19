@@ -44,7 +44,13 @@ Durée : environ 30 minutes. Tout est gratuit (offres gratuites de Supabase et N
    ```
 6. **Bloquez les inscriptions publiques** :
    **Authentication** > **Sign In / Providers** > **Email** : désactivez *Allow new users to sign up*.
-7. Récupérez vos clés : **Project Settings** > **API**
+7. **Liens « mot de passe oublié »** : **Authentication** > **URL Configuration**
+   - *Site URL* : l'adresse du site, ex. `https://sankaraibrahim.vercel.app`
+   - *Redirect URLs* : ajoutez `https://sankaraibrahim.vercel.app/admin/**`
+
+   Sans ce réglage, le lien reçu par email renvoie vers une mauvaise adresse.
+   L'envoi d'emails par défaut de Supabase est limité à quelques messages par heure, et ne part que vers les membres de l'équipe du projet Supabase. Pour l'ouvrir à d'autres adresses, configurez un SMTP dans **Project Settings** > **Authentication**.
+8. Récupérez vos clés : **Project Settings** > **API**
    - `Project URL` → `VITE_SUPABASE_URL`
    - `anon public` key → `VITE_SUPABASE_ANON_KEY`
 

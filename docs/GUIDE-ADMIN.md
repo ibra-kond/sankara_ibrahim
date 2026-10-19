@@ -113,6 +113,20 @@ Touchez **Enregistrer** en bas de l'écran.
 
 ---
 
+## 9. Sécurité de mon compte 🔒
+
+Touchez **Sécurité** en haut de l'écran.
+
+- **Changer mon mot de passe :** tapez l'ancien, puis le nouveau deux fois. Le nouveau doit avoir au moins 10 caractères, des majuscules, des minuscules et un chiffre. Les règles deviennent vertes quand elles sont respectées.
+- **Déconnecter tous les appareils :** en cas de téléphone perdu ou de mot de passe donné à quelqu'un. Il faudra ensuite se reconnecter partout.
+- **Mot de passe oublié :** sur l'écran de connexion, touchez **« Mot de passe oublié ? »**. Vous recevez un email : ouvrez-le sur votre téléphone, touchez le lien (valable 1 heure), puis choisissez un nouveau mot de passe.
+
+Pour votre protection :
+- après 30 minutes sans rien toucher, vous êtes déconnecté automatiquement ;
+- après 5 mauvais mots de passe, la connexion est bloquée quelques minutes.
+
+---
+
 ## En cas de problème
 
 | Problème | Solution |
