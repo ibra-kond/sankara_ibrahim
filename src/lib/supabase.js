@@ -5,6 +5,13 @@ export const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 export const isSupabase = Boolean(SUPABASE_URL && SUPABASE_KEY)
 export const MEDIA_BUCKET = 'media'
 
+// Lien « mot de passe oublié » reçu par email : on le repère avant que Supabase ne nettoie l'adresse.
+const hash = typeof location !== 'undefined' ? location.hash : ''
+export const recoveryLink = {
+  valid: hash.includes('type=recovery'),
+  expired: hash.includes('error_code=otp_expired') || hash.includes('error=access_denied'),
+}
+
 let clientPromise
 /** Client Supabase chargé à la demande (uniquement dans l'admin) pour alléger le site public. */
 export function getClient() {

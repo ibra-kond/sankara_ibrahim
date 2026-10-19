@@ -3,41 +3,85 @@ import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from '
 import Icon from '../components/Icon'
 import { useSite } from '../context/SiteContext'
 import { DEMO_LOGIN, adminDelete, adminList, adminReorder, adminSave, getUser, resetDemo, signIn, signOut } from '../lib/api'
-import { isSupabase } from '../lib/supabase'
+import { isSupabase, recoveryLink } from '../lib/supabase'
 import ItemForm from './ItemForm'
 import ItemList from './ItemList'
 import { SCHEMAS } from './schemas'
 import SettingsForm from './SettingsForm'
+import { ForgotPassword, RecoveryPage, SecurityPage } from './Security'
 import { Confirm, Spinner, ToastProvider, useToast } from './ui'
 
 /* ------------------------------------------------------------------ */
 /*  Connexion                                                          */
 /* ------------------------------------------------------------------ */
-function Login({ onLogin }) {
+/*
+ * Anti-acharnement : après 5 échecs, la connexion est bloquée 1 min, puis 5, puis 15.
+ * (Supabase limite aussi les tentatives côté serveur.)
+ */
+const LOCK_KEY = 'admin-login-guard'
+const readGuard = () => {
+  try {
+    return JSON.parse(localStorage.getItem(LOCK_KEY)) || { fails: 0, until: 0 }
+  } catch {
+    return { fails: 0, until: 0 }
+  }
+}
+const writeGuard = (g) => {
+  try {
+    localStorage.setItem(LOCK_KEY, JSON.stringify(g))
+  } catch {
+    /* ignore */
+  }
+}
+
+function Login({ onLogin, notice }) {
   const { settings } = useSite()
+  const [mode, setMode] = useState('login')
   const [email, setEmail] = useState(isSupabase ? '' : DEMO_LOGIN.email)
   const [password, setPassword] = useState('')
   const [show, setShow] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [now, setNow] = useState(Date.now())
+  const lockedFor = Math.max(0, Math.ceil((readGuard().until - now) / 1000))
+
+  useEffect(() => {
+    if (!lockedFor) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [lockedFor])
 
   const submit = async (e) => {
     e.preventDefault()
+    if (lockedFor) return
     setError('')
     setLoading(true)
     try {
-      onLogin(await signIn(email, password))
+      const user = await signIn(email, password)
+      writeGuard({ fails: 0, until: 0 })
+      onLogin(user)
     } catch (err) {
-      setError(err.message)
+      const g = readGuard()
+      g.fails += 1
+      if (g.fails >= 5) g.until = Date.now() + [60, 300, 900][Math.min(2, Math.floor(g.fails / 5) - 1)] * 1000
+      writeGuard(g)
+      setNow(Date.now())
+      setError(g.fails >= 5 ? 'Trop d’essais. Patientez avant de réessayer, ou utilisez « Mot de passe oublié ».' : err.message)
+      setPassword('')
       setLoading(false)
     }
   }
 
   return (
     <main className="wood-grain grid min-h-[100svh] place-items-center bg-bg p-4">
-      <form onSubmit={submit} className="w-full max-w-sm rounded-3xl bg-surface p-6 shadow-lift sm:p-8">
+      <div className="w-full max-w-sm rounded-3xl bg-surface p-6 shadow-lift sm:p-8">
         <p className="eyebrow">Espace atelier</p>
-        <h1 className="mt-2 text-3xl font-semibold">{settings.businessName}</h1>
+        <h1 className="mt-2 text-3xl font-semibold">{mode === 'forgot' ? 'Mot de passe oublié' : settings.businessName}</h1>
+        {notice && <p role="status" className="mt-4 rounded-xl bg-oak/15 p-3 text-sm font-medium">{notice}</p>}
+        {mode === 'forgot' ? (
+          <ForgotPassword initialEmail={email} onBack={() => setMode('login')} />
+        ) : (
+        <form onSubmit={submit}>
         {!isSupabase && (
           <p className="mt-4 rounded-xl bg-oak/15 p-3 text-sm">
             <strong>Mode démo</strong> — mot de passe : <code className="font-bold">{DEMO_LOGIN.password}</code>
@@ -59,11 +103,18 @@ function Login({ onLogin }) {
           </div>
         </div>
         {error && <p role="alert" className="mt-4 font-semibold text-[#B3392B]">{error}</p>}
-        <button type="submit" disabled={loading} className="btn mt-6 min-h-[56px] w-full bg-ink text-lg text-bg">
-          {loading ? <Spinner /> : 'Se connecter'}
+        <button type="submit" disabled={loading || lockedFor > 0} className="btn mt-6 min-h-[56px] w-full bg-ink text-lg text-bg">
+          {loading ? <Spinner /> : lockedFor ? `Réessayez dans ${lockedFor} s` : 'Se connecter'}
         </button>
-        <Link to="/" className="mt-4 flex min-h-[44px] items-center justify-center text-sm text-muted underline">Retour au site</Link>
-      </form>
+        {isSupabase && (
+          <button type="button" onClick={() => { setError(''); setMode('forgot') }} className="mt-3 flex min-h-[44px] w-full items-center justify-center text-sm font-semibold underline">
+            Mot de passe oublié ?
+          </button>
+        )}
+        <Link to="/" className="flex min-h-[44px] items-center justify-center text-sm text-muted underline">Retour au site</Link>
+        </form>
+        )}
+      </div>
     </main>
   )
 }
@@ -228,10 +279,16 @@ function Shell({ user, onLogout, children, hideTabs }) {
     <div className="min-h-[100svh] bg-bg">
       <header className="sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-2xl items-center justify-between gap-2 px-4">
-          <Link to="/" target="_blank" className="flex min-h-[44px] items-center gap-2 text-sm font-semibold">
-            <Icon name="external" size={18} /> Voir mon site
+          <Link to="/" target="_blank" aria-label="Voir mon site (nouvel onglet)" className="flex min-h-[44px] min-w-[44px] items-center gap-1.5 whitespace-nowrap text-sm font-semibold">
+            <Icon name="external" size={18} /> <span className="hidden min-[360px]:inline">Mon site</span>
           </Link>
-          <button type="button" onClick={onLogout} className="flex min-h-[44px] items-center gap-2 rounded-full px-3 text-sm font-semibold hover:bg-oak/15">
+          <NavLink
+            to="/admin/securite"
+            className={({ isActive }) => `flex min-h-[44px] items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-oak/15 ${isActive ? 'bg-oak/25' : ''}`}
+          >
+            <Icon name="lock" size={18} /> Sécurité
+          </NavLink>
+          <button type="button" onClick={() => onLogout()} className="flex min-h-[44px] items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-oak/15">
             <Icon name="logout" size={18} /> Déconnexion
           </button>
         </div>
@@ -275,11 +332,76 @@ function Shell({ user, onLogout, children, hideTabs }) {
   )
 }
 
+/* Déconnexion automatique après 30 min sans activité (même si l'app est rouverte plus tard) */
+const IDLE_MS = 30 * 60 * 1000
+const ACTIVITY_KEY = 'admin-last-activity'
+const markActivity = () => {
+  try {
+    localStorage.setItem(ACTIVITY_KEY, String(Date.now()))
+  } catch {
+    /* ignore */
+  }
+}
+const isIdle = () => {
+  const last = Number(localStorage.getItem(ACTIVITY_KEY) || 0)
+  return last > 0 && Date.now() - last > IDLE_MS
+}
+
+/** Affiche un message une seule fois (dans le ToastProvider) */
+function Flash({ message }) {
+  const toast = useToast()
+  useEffect(() => {
+    if (message) toast(message)
+  }, [message, toast])
+  return null
+}
+
 export default function Admin() {
+  const navigate = useNavigate()
   const [user, setUser] = useState(undefined)
+  const [notice, setNotice] = useState(recoveryLink.expired ? 'Ce lien a expiré ou a déjà servi. Refaites une demande « Mot de passe oublié ».' : '')
+  const [recovering, setRecovering] = useState(recoveryLink.valid)
+  const [flash, setFlash] = useState('')
+
+  const logout = useCallback(async (message = '') => {
+    await signOut()
+    setUser(null)
+    setNotice(message)
+  }, [])
+
+  // Suivi d'activité + contrôle d'inactivité tant que l'admin est connecté
+  useEffect(() => {
+    if (!user) return
+    let last = 0
+    const onActivity = () => {
+      if (Date.now() - last > 15000) {
+        last = Date.now()
+        markActivity()
+      }
+    }
+    const check = () => isIdle() && logout('Vous avez été déconnecté après 30 minutes sans activité.')
+    const onVisible = () => document.visibilityState === 'visible' && check()
+    const events = ['pointerdown', 'keydown', 'scroll', 'touchstart']
+    events.forEach((ev) => window.addEventListener(ev, onActivity, { passive: true }))
+    document.addEventListener('visibilitychange', onVisible)
+    const timer = setInterval(check, 30000)
+    return () => {
+      events.forEach((ev) => window.removeEventListener(ev, onActivity))
+      document.removeEventListener('visibilitychange', onVisible)
+      clearInterval(timer)
+    }
+  }, [user, logout])
 
   useEffect(() => {
-    getUser().then(setUser)
+    getUser().then((u) => {
+      if (u && !recoveryLink.valid && isIdle()) return logout('Vous avez été déconnecté après 30 minutes sans activité.')
+      if (!u && recoveryLink.valid) {
+        setRecovering(false)
+        setNotice('Ce lien a expiré ou a déjà servi. Refaites une demande « Mot de passe oublié ».')
+      }
+      if (u) markActivity()
+      setUser(u)
+    })
     // L'admin ne doit pas être indexé par Google
     const meta = document.createElement('meta')
     meta.name = 'robots'
@@ -295,16 +417,48 @@ export default function Admin() {
 
   if (user === undefined) return <div className="grid min-h-screen place-items-center text-muted"><Spinner /></div>
 
+  const shell = (children, props = {}) => (
+    <Shell user={user} onLogout={() => logout()} {...props}>{children}</Shell>
+  )
+
   return (
     <ToastProvider>
+      <Flash message={flash} />
       {!user ? (
-        <Login onLogin={setUser} />
+        <Login
+          notice={notice}
+          onLogin={(u) => {
+            markActivity()
+            setNotice('')
+            setUser(u)
+          }}
+        />
+      ) : recovering ? (
+        <RecoveryPage
+          onDone={() => {
+            recoveryLink.valid = false
+            setRecovering(false)
+            markActivity()
+            setFlash('Nouveau mot de passe enregistré !')
+            navigate('/admin/creations', { replace: true })
+          }}
+        />
       ) : (
         <Routes>
           <Route index element={<Navigate to="creations" replace />} />
-          <Route path="atelier" element={<Shell user={user} onLogout={async () => { await signOut(); setUser(null) }}><h1 className="mb-5 font-sans text-2xl font-bold">Mon atelier</h1><SettingsForm /></Shell>} />
-          <Route path=":table" element={<Shell user={user} onLogout={async () => { await signOut(); setUser(null) }}><CollectionPage /></Shell>} />
-          <Route path=":table/:id" element={<Shell user={user} hideTabs onLogout={async () => { await signOut(); setUser(null) }}><EditPage /></Shell>} />
+          <Route path="nouveau-mot-de-passe" element={<Navigate to="/admin/creations" replace />} />
+          <Route path="atelier" element={shell(<><h1 className="mb-5 font-sans text-2xl font-bold">Mon atelier</h1><SettingsForm /></>)} />
+          <Route
+            path="securite"
+            element={shell(
+              <>
+                <h1 className="mb-5 font-sans text-2xl font-bold">Sécurité</h1>
+                <SecurityPage user={user} onLoggedOut={() => { setUser(null); setNotice('Tous les appareils ont été déconnectés.') }} />
+              </>,
+            )}
+          />
+          <Route path=":table" element={shell(<CollectionPage />)} />
+          <Route path=":table/:id" element={shell(<EditPage />, { hideTabs: true })} />
         </Routes>
       )}
     </ToastProvider>

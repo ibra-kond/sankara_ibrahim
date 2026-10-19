@@ -80,6 +80,52 @@ export async function signOut() {
   await sb.auth.signOut()
 }
 
+/* ---- Sécurité du compte ---- */
+const DEMO_UNAVAILABLE = 'Indisponible en mode démo : branchez Supabase pour utiliser cette fonction.'
+
+/** Règles d'un mot de passe solide. Renvoie la liste des règles non respectées. */
+export function passwordIssues(pwd = '') {
+  const issues = []
+  if (pwd.length < 10) issues.push('au moins 10 caractères')
+  if (!/[a-z]/.test(pwd) || !/[A-Z]/.test(pwd)) issues.push('des majuscules et des minuscules')
+  if (!/\d/.test(pwd)) issues.push('au moins un chiffre')
+  return issues
+}
+
+/** Change le mot de passe après avoir revérifié l'actuel (protège une session laissée ouverte). */
+export async function changePassword(email, current, next) {
+  if (!isSupabase) throw new Error(DEMO_UNAVAILABLE)
+  const sb = await getClient()
+  const check = await sb.auth.signInWithPassword({ email, password: current })
+  if (check.error) throw new Error('Le mot de passe actuel est incorrect.')
+  const { error } = await sb.auth.updateUser({ password: next })
+  if (error) throw new Error(error.message.includes('different') ? 'Le nouveau mot de passe doit être différent de l’ancien.' : 'Changement impossible. Réessayez.')
+}
+
+/** Envoie l'email « mot de passe oublié ». Réponse identique que l'email existe ou non. */
+export async function requestPasswordReset(email) {
+  if (!isSupabase) throw new Error(DEMO_UNAVAILABLE)
+  const sb = await getClient()
+  const { error } = await sb.auth.resetPasswordForEmail(email.trim(), {
+    redirectTo: `${location.origin}/admin/nouveau-mot-de-passe`,
+  })
+  if (error && error.status === 429) throw new Error('Trop de demandes. Patientez quelques minutes.')
+}
+
+/** Définit le nouveau mot de passe depuis le lien reçu par email (session de récupération). */
+export async function setRecoveredPassword(next) {
+  const sb = await getClient()
+  const { error } = await sb.auth.updateUser({ password: next })
+  if (error) throw new Error('Le lien a expiré. Refaites une demande « Mot de passe oublié ».')
+}
+
+/** Ferme la session sur tous les appareils (téléphone perdu, mot de passe partagé…). */
+export async function signOutEverywhere() {
+  if (!isSupabase) return signOut()
+  const sb = await getClient()
+  await sb.auth.signOut({ scope: 'global' })
+}
+
 export async function getUser() {
   if (!isSupabase) return sessionStorage.getItem('demo-session') ? { email: DEMO_LOGIN.email } : null
   const sb = await getClient()
